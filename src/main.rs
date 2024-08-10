@@ -1,7 +1,5 @@
-use std::ops::RangeFrom;
-
 use bevy::{prelude::*, window::WindowResolution};
-use rand::Rng;
+use bevy_rapier2d::prelude::*;
 
 const WINDOW_WIDTH: f32 = 700.;
 const WINDOW_HEIGHT: f32 = 500.;
@@ -25,15 +23,20 @@ fn main() {
         ..Default::default()
     }));
 
+    app.insert_resource(RapierConfiguration {
+        gravity: Vec2::ZERO,
+        ..RapierConfiguration::new(1.)
+    });
+    app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
+    #[cfg(debug_assertions)]
+    app.add_plugins(RapierDebugRenderPlugin::default());
+
     app.add_systems(
         Startup,
         (spawn_background, spawn_players, spawn_ball, spawn_camera).chain(),
     );
 
-    app.add_systems(
-        Update,
-        (move_paddle, move_ball, ball_outside, ball_collide).chain(),
-    );
+    app.add_systems(Update, (move_paddle).chain());
     app.run();
 }
 
@@ -79,6 +82,8 @@ fn spawn_player(commands: &mut Commands, x: f32, paddle: Paddle) {
             ..Default::default()
         },
         paddle,
+        RigidBody::KinematicPositionBased,
+        Collider::cuboid(PADDLE_WIDTH * 0.5, PADDLE_HEIGHT * 0.5),
     ));
 }
 
@@ -91,6 +96,23 @@ fn spawn_background(mut commands: Commands) {
         },
         ..Default::default()
     });
+
+    commands.spawn((
+        SpatialBundle {
+            transform: Transform::from_translation(Vec3::new(0., WINDOW_HEIGHT * 0.5, 0.)),
+            ..Default::default()
+        },
+        RigidBody::Fixed,
+        Collider::cuboid(WINDOW_WIDTH * 0.5, 3.),
+    ));
+    commands.spawn((
+        SpatialBundle {
+            transform: Transform::from_translation(Vec3::new(0., -WINDOW_HEIGHT * 0.5, 0.)),
+            ..Default::default()
+        },
+        RigidBody::Fixed,
+        Collider::cuboid(WINDOW_WIDTH * 0.5, 3.),
+    ));
 }
 
 fn move_paddle(
@@ -115,60 +137,63 @@ fn move_paddle(
 }
 
 #[derive(Component)]
-struct Ball {
-    velocity: Vec2,
-}
+struct Ball;
 
-fn spawn_ball(mut commands: Commands) {
+fn spawn_ball(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         SpriteBundle {
+            texture: asset_server.load("ball.png"),
             transform: Transform::from_translation(Vec3::new(0., 0., 0.)),
             sprite: Sprite {
                 color: Color::WHITE,
-                custom_size: Some(Vec2::new(25., 25.)),
+                custom_size: Some(Vec2::new(BALL_SIZE * 2., BALL_SIZE * 2.)),
                 ..Default::default()
             },
             ..Default::default()
         },
-        Ball {
-            velocity: Vec2::new(-100., 0.),
+        Ball,
+        RigidBody::Dynamic,
+        Collider::ball(BALL_SIZE),
+        Velocity::linear(Vec2::new(100., 0.)),
+        Restitution {
+            coefficient: 1.,
+            combine_rule: CoefficientCombineRule::Max,
+        },
+        Damping {
+            linear_damping: 0.,
+            angular_damping: 0.,
         },
     ));
 }
 
-fn move_ball(mut balls: Query<(&mut Transform, &Ball)>, time: Res<Time>) {
-    for (mut pos, ball) in &mut balls {
-        pos.translation += ball.velocity.extend(0.) * time.delta_seconds();
+// fn move_ball(mut balls: Query<(&mut Transform, &Ball)>, time: Res<Time>) {
+//     for (mut pos, ball) in &mut balls {
+//         pos.translation += ball.velocity.extend(0.) * time.delta_seconds();
+//     }
+// }
 
-        // pos.translation.y = pos
-        //     .translation
-        //     .y
-        //     .clamp(-WINDOW_HEIGHT * 0.5 + 75., WINDOW_HEIGHT * 0.5 - 75.)
-    }
-}
+// fn ball_collide(
+//     mut balls: Query<(&Transform, &mut Ball)>,
+//     paddles: Query<&Transform, With<Paddle>>,
+// ) {
+//     for (pos, mut ball) in &mut balls {
+//         for paddle in &paddles {
+//             if pos.translation.x - BALL_SIZE * 0.5 < paddle.translation.x + PADDLE_WIDTH * 0.5
+//                 && pos.translation.y - BALL_SIZE * 0.5 < paddle.translation.y + PADDLE_HEIGHT * 0.5
+//                 && pos.translation.x + BALL_SIZE * 0.5 > paddle.translation.x - PADDLE_WIDTH * 0.5
+//                 && pos.translation.y + BALL_SIZE * 0.5 > paddle.translation.x - PADDLE_HEIGHT * 0.5
+//             {
+//                 ball.velocity *= -1.;
+//                 ball.velocity.y = rand::thread_rng().gen_range(-100.0..100.0);
+//             }
+//         }
+//     }
+// }
 
-fn ball_collide(
-    mut balls: Query<(&Transform, &mut Ball)>,
-    paddles: Query<&Transform, With<Paddle>>,
-) {
-    for (pos, mut ball) in &mut balls {
-        for paddle in &paddles {
-            if pos.translation.x - BALL_SIZE * 0.5 < paddle.translation.x + PADDLE_WIDTH * 0.5
-                && pos.translation.y - BALL_SIZE * 0.5 < paddle.translation.y + PADDLE_HEIGHT * 0.5
-                && pos.translation.x + BALL_SIZE * 0.5 > paddle.translation.x - PADDLE_WIDTH * 0.5
-                && pos.translation.y + BALL_SIZE * 0.5 > paddle.translation.x - PADDLE_HEIGHT * 0.5
-            {
-                ball.velocity *= -1.;
-                ball.velocity.y = rand::thread_rng().gen_range(-100.0..100.0);
-            }
-        }
-    }
-}
-
-fn ball_outside(mut balls: Query<(&Transform, &mut Ball)>) {
-    for (pos, mut ball) in &mut balls {
-        if pos.translation.y.abs() + BALL_SIZE * 0.5 > WINDOW_HEIGHT * 0.5 {
-            ball.velocity.y *= -1.;
-        }
-    }
-}
+// fn ball_outside(mut balls: Query<(&Transform, &mut Ball)>) {
+//     for (pos, mut ball) in &mut balls {
+//         if pos.translation.y.abs() + BALL_SIZE * 0.5 > WINDOW_HEIGHT * 0.5 {
+//             ball.velocity.y *= -1.;
+//         }
+//     }
+// }
